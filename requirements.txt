@@ -1,0 +1,8 @@
+# Python runtime: >=3.11
+
+numpy
+scipy
+pandas
+requests
+tqdm
+ipython
