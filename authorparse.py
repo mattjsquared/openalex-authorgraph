@@ -9,13 +9,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from IPython.display import Markdown, display
 
 
+BASE_URL = "https://api.openalex.org/"
+USER_EMAIL = ""
+
+
 # --- Helpers: HTTP GET with exponential backoff on "429" errors & automated GET pagination ---
 @contextmanager
 def _conditional_session(
   session: requests.Session = None
-) -> requests.Session:
+):
   """
-  Context‐manager that yields a requests.Session for HTTP requests.
+  Context-manager that yields a requests.Session for HTTP requests.
 
   If an existing Session is provided, that session is reused (and not closed).
   Otherwise, a new Session is created at entry and automatically closed on exit.
@@ -50,7 +54,7 @@ def request_with_backoff(
   max_wait: float = 10
 ) -> dict:
   """
-  Perform an HTTP GET with automatic retry logic for rate‐limit and occasional 404 fallbacks.
+  Perform an HTTP GET with automatic retry logic for rate-limit and occasional 404 fallbacks.
 
   This function will:
     1. Attach a `mailto` parameter for polite API usage.
@@ -63,15 +67,14 @@ def request_with_backoff(
     url (str): Full OpenAlex API URL (e.g. "https://api.openalex.org/works").
     params (dict, optional): Query parameters to include; a `mailto` key will be added.
     session (requests.Session, optional): Existing Session to reuse; if None, a new one is created.
-    max_retries (int): Max number of 429‐retry attempts.
+    max_retries (int): Max number of 429-retry attempts.
     max_wait (float): Max total time (in seconds) to spend retrying before giving up.
 
   Returns:
-    dict: The JSON‐decoded response body.
-
+    dict: The JSON-decoded response body.
   Raises:
-    requests.exceptions.HTTPError: If a non‐retryable error occurs (anything other than handled 404/429),
-      or if 429 retries/time‐budget are exhausted.
+    requests.exceptions.HTTPError: If a non-retryable error occurs (anything other than handled 404/429),
+      or if 429 retries/time-budget are exhausted.
   """
   retries = 0
   pause = 0.1
@@ -106,10 +109,10 @@ def _paginate_request(
   max_pages: int = None
 ):
   """
-  Lazily retrieve paginated results from an OpenAlex endpoint using cursor‐based pagination.
+  Lazily retrieve paginated results from an OpenAlex endpoint using cursor-based pagination.
 
   This generator will:
-    1. Initialize the cursor to "*" and include a per‐page limit.
+    1. Initialize the cursor to "*" and include a per-page limit.
     2. Repeatedly call `request_with_backoff()` to fetch each page.
     3. Yield the full JSON response for each page (including both "results" and "meta").
     4. Stop when the returned page has no `meta.next_cursor` or when `max_pages` is reached.
@@ -122,7 +125,7 @@ def _paginate_request(
     max_pages (int, optional): Maximum number of pages to retrieve; if None, fetch until exhausted.
 
   Yields:
-    dict: Each page’s parsed JSON payload, containing:
+    dict: Each page's parsed JSON payload, containing:
       - "results": list of entity records for that page
       - "meta":   metadata including "count", "next_cursor", etc.
   """
@@ -151,9 +154,9 @@ def request_collated_pages(
   Retrieve all pages from an OpenAlex endpoint and group their payloads.
 
   This function will:
-    1. Use the cursor‑based pagination generator `_paginate_request` to fetch each page.
-    2. Collect each page’s “results” lists into a single list of lists.
-    3. Collect each page’s “meta” dictionaries into a single list of page metadata.
+    1. Use the cursor-based pagination generator `_paginate_request` to fetch each page.
+    2. Collect each page's "results" lists into a single list of lists.
+    3. Collect each page's "meta" dictionaries into a single list of page metadata.
 
   Args:
     url (str): The base OpenAlex API URL to page through (e.g. "https://api.openalex.org/works").
@@ -194,7 +197,7 @@ def request_entities(
 
   This function will:
     1. Fetch every page of results via `request_collated_pages`.
-    2. Flatten the per‑page “results” lists into a single list.
+    2. Flatten the per-page "results" lists into a single list.
     3. If `include_meta` is True, aggregate shared metadata across pages.
 
   Args:
@@ -203,14 +206,13 @@ def request_entities(
     session (requests.Session, optional): Session to reuse for HTTP requests; if None, a new one is created.
     per_page (int): Number of items to request per page.
     max_pages (int, optional): Maximum number of pages to fetch; if None, continues until no more pages.
-    include_meta (bool): If True, include aggregate metadata under the “meta” key.
-
+    include_meta (bool): If True, include aggregate metadata under the "meta" key.
   Returns:
     dict:
       - "results" (List[dict]): All items from every page, concatenated.
       - "meta" (dict, optional): Present only if `include_meta` is True, containing:
-          • "count":             Total items available (from first page’s metadata).
-          • "groups_count":      Optional grouping count (from first page’s metadata).
+          • "count":             Total items available (from first page's metadata).
+          • "groups_count":      Optional grouping count (from first page's metadata).
           • "page_count":        Number of pages retrieved.
           • "db_response_time_total": Sum of `db_response_time_ms` across all pages.
 
@@ -301,7 +303,7 @@ def standardize_author_ids(
   This function will:
     1. Accept a single author (str or dict) or a list of them.
     2. Identify which inputs look like ORCIDs (contain exactly 3 hyphens).
-    3. Batch‑fetch the corresponding OpenAlex author URLs for those ORCIDs.
+    3. Batch-fetch the corresponding OpenAlex author URLs for those ORCIDs.
     4. Preserve any inputs that are already OpenAlex URLs/IDs unchanged.
     5. Return a list of OpenAlex author URLs in the same order as the inputs.
 
@@ -363,8 +365,8 @@ def standardize_work_ids(
 
   This function will:
     1. Accept a single work identifier (str or dict) or a list of them.
-    2. Identify which inputs look like DOIs (the part after “.org/” starts with "10.").
-    3. Batch‑fetch the corresponding OpenAlex work URLs for those DOIs in a single API call.
+    2. Identify which inputs look like DOIs (the part after ".org/" starts with "10.").
+    3. Batch-fetch the corresponding OpenAlex work URLs for those DOIs in a single API call.
     4. Preserve any inputs that are already OpenAlex work URLs/IDs unchanged.
     5. Return a list of OpenAlex work URLs in the same order as the inputs.
 
@@ -443,7 +445,7 @@ def fetch_authors(
       Single author identifier or list of identifiers/dicts as described above.
     fields (str or list[str], optional):
       Fields to include in each author record (returned under `"select"`). If None,
-      all top‑level fields are returned.
+      all top-level fields are returned.
     session (requests.Session, optional):
       An existing HTTP session to reuse for all requests. If None, a temporary session
       will be created and closed automatically.
@@ -498,7 +500,7 @@ def fetch_works(
       Single work identifier or list of identifiers/dicts as described above.
     fields (str or list[str], optional):
       Fields to include in each work record (mapped to the "select" parameter).
-      If None, all top‑level fields are returned.
+      If None, all top-level fields are returned.
     session (requests.Session, optional):
       An existing HTTP session to reuse for all requests. If None, a temporary session
       will be created and closed automatically.
@@ -551,8 +553,8 @@ def fetch_works_from_author(
         - An ORCID URL or code (e.g. "https://orcid.org/0000-0001-2345-6789" or "0000-0001-2345-6789")
         - A dict containing at least an `"id"` or `"orcid"` key
     fields (str or list[str], optional):
-      One or more top‑level work attributes to include in each returned record.
-      Passed directly to the API’s `select` parameter. If None, all fields are returned.
+      One or more top-level work attributes to include in each returned record.
+      Passed directly to the API's `select` parameter. If None, all fields are returned.
     session (requests.Session, optional):
       An existing `requests.Session` to reuse for HTTP calls. If None, a temporary
       session is created and closed automatically.
@@ -560,11 +562,11 @@ def fetch_works_from_author(
   Returns:
     list[dict]:
       A list of OpenAlex work JSON objects authored by the specified author,
-      in no particular order beyond the API’s internal pagination sequence.
+      in no particular order beyond the API's internal pagination sequence.
 
   Raises:
     HTTPError:
-      If the underlying HTTP request fails for any non‑rate‑limit error.
+      If the underlying HTTP request fails for any non-rate-limit error.
   """
   params = _fields2params(fields)
   url = f"{BASE_URL}works"
@@ -599,8 +601,8 @@ def fetch_citing_works_from_work(
         - A DOI URL or code (e.g. "https://doi.org/10.1000/xyz123" or "10.1000/xyz123")
         - A dict containing at least an `"id"` or `"doi"` key
     fields (str or list[str], optional):
-      One or more top‑level work attributes to include in each returned record.
-      Passed directly to the API’s `select` parameter. If None, all fields are returned.
+      One or more top-level work attributes to include in each returned record.
+      Passed directly to the API's `select` parameter. If None, all fields are returned.
     session (requests.Session, optional):
       An existing `requests.Session` to reuse for HTTP calls. If None, a temporary
       session is created and closed automatically.
@@ -608,11 +610,11 @@ def fetch_citing_works_from_work(
   Returns:
     list[dict]:
       A list of OpenAlex work JSON objects that cite the specified work,
-      in no particular order beyond the API’s internal pagination sequence.
+      in no particular order beyond the API's internal pagination sequence.
 
   Raises:
     HTTPError:
-      If any underlying HTTP request fails for a non‑rate‑limit error.
+      If any underlying HTTP request fails for a non-rate-limit error.
   """
   params = _fields2params(fields)
   params['per-page'] = 200
@@ -636,10 +638,10 @@ def fetch_authors_from_work(
   This function:
     1. Normalizes the input `work_id` (which may be a DOI, OpenAlex ID, URL, or dict)
        into the canonical OpenAlex work URL.
-    2. Fetches the work’s basic record (including its `authorships` array) via the
+    2. Fetches the work's basic record (including its `authorships` array) via the
        `/works` endpoint.
-    3. Extracts each author’s OpenAlex URL/ID from the `authorships` entries.
-    4. Batch‑fetches the full author records (optionally filtered to `fields`) via
+    3. Extracts each author's OpenAlex URL/ID from the `authorships` entries.
+    4. Batch-fetches the full author records (optionally filtered to `fields`) via
        the `/authors` endpoint.
 
   Args:
@@ -650,23 +652,23 @@ def fetch_authors_from_work(
         - A DOI URL or code (e.g. "https://doi.org/10.1000/xyz123" or "10.1000/xyz123")
         - A dict containing at least an `"id"` or `"doi"` key
     fields (str or list[str], optional):
-      One or more top‑level author attributes to include in each returned record.
-      Passed directly to the API’s `select` parameter. If None, all author fields are returned.
+      One or more top-level author attributes to include in each returned record.
+      Passed directly to the API's `select` parameter. If None, all author fields are returned.
     session (requests.Session, optional):
       An existing `requests.Session` to reuse for HTTP calls. If None, a temporary
       session is created and closed automatically.
 
   Returns:
     list[dict]:
-      A list of OpenAlex author JSON objects corresponding to the work’s authors,
-      in the same order as they appear in the work’s `authorships` list.
+      A list of OpenAlex author JSON objects corresponding to the work's authors,
+      in the same order as they appear in the work's `authorships` list.
       Returns an empty list (and issues a warning) if the work has no `authorships`.
 
   Raises:
     RuntimeError:
       If any author lookup fails (e.g., an expected author ID cannot be retrieved).
     HTTPError:
-      If any underlying HTTP request fails for a non‑rate‑limit error.
+      If any underlying HTTP request fails for a non-rate-limit error.
   """
   with _conditional_session(session) as _session:
     work_id = standardize_work_ids(work_id, session=_session)[0]
@@ -692,7 +694,7 @@ def fetch_authors_from_works(
     1. Normalizes each entry in `work_ids` to its canonical OpenAlex work URL.
     2. For each work, fetches its authorships via `fetch_authors_from_work`.
     3. Aggregates all author records into a single flat list, or, if
-       `keep_parent_ids=True`, returns a dict mapping each work’s URL to
+       `keep_parent_ids=True`, returns a dict mapping each work's URL to
        its list of author JSON objects.
 
   Args:
@@ -703,27 +705,27 @@ def fetch_authors_from_works(
         - A DOI URL or code (e.g. "https://doi.org/10.1000/xyz123" or "10.1000/xyz123")
         - A dict containing at least an `"id"` or `"doi"` key
     fields (str or list[str], optional):
-      Top‑level author fields to include in each returned record. Passed through
-      to the API’s `select` parameter; if None, the full author record is returned.
+      Top-level author fields to include in each returned record. Passed through
+      to the API's `select` parameter; if None, the full author record is returned.
     session (requests.Session, optional):
       An existing HTTP session to reuse for all requests. If None, a temporary
       session is created and closed internally.
     keep_parent_ids (bool):
       - If False (default), returns a flat `list[dict]` of all authors across
         the specified works.
-      - If True, returns a `dict` whose keys are each work’s OpenAlex URL and
-        whose values are the `list[dict]` of that work’s authors.
+      - If True, returns a `dict` whose keys are each work's OpenAlex URL and
+        whose values are the `list[dict]` of that work's authors.
 
   Returns:
     list[dict] or dict[str, list[dict]]:
       Depending on `keep_parent_ids`, either:
         - A flat list of author JSON objects (duplicates possible if authors
           appear on multiple works), or
-        - A mapping from each work’s URL to its list of author JSON objects.
+        - A mapping from each work's URL to its list of author JSON objects.
 
   Raises:
     HTTPError:
-      If any underlying API call fails with a non‑rate‑limit error.
+      If any underlying API call fails with a non-rate-limit error.
     RuntimeError:
       If author lookup for any work fails to retrieve the expected data.
   """
@@ -754,7 +756,7 @@ def fetch_coauthors_from_author(
     3. For each work, retrieves its list of authors.
     4. Aggregates these coauthor records into either:
        - A flat list of coauthor JSON objects (if `keep_parent_ids=False`), or
-       - A dict mapping each work’s URL to its list of coauthor JSON objects
+       - A dict mapping each work's URL to its list of coauthor JSON objects
          (if `keep_parent_ids=True`).
 
   Args:
@@ -762,14 +764,14 @@ def fetch_coauthors_from_author(
       An ORCID, OpenAlex author URL/ID, or a dict containing an "id" or "orcid".
     fields (str or list[str], optional):
       Specific top-level author fields to include in each returned record.
-      Passed through to the API’s `select` parameter; if None, the full record
+      Passed through to the API's `select` parameter; if None, the full record
       is returned.
     session (requests.Session, optional):
       An existing HTTP session to reuse for all requests. If None, a new session
       is opened and closed internally.
     keep_parent_ids (bool, default=False):
       - If False: returns a flat list of all coauthor JSON dicts.
-      - If True: returns a dict where each key is a work’s OpenAlex URL and each
+      - If True: returns a dict where each key is a work's OpenAlex URL and each
         value is the list of coauthor JSON dicts for that work.
 
   Returns:
@@ -780,7 +782,7 @@ def fetch_coauthors_from_author(
 
   Raises:
     HTTPError:
-      If any underlying API request fails with a non‑rate‑limit error.
+      If any underlying API request fails with a non-rate-limit error.
     RuntimeError:
       If a work or author lookup does not return the expected data.
   """
@@ -807,7 +809,7 @@ def fetch_citing_works_from_works(
     2. For each work URL, fetches all works that cite it.
     3. Aggregates the citing-work records into either:
        - A flat list of work JSON objects (if `keep_parent_ids=False`), or
-       - A dict mapping each original work’s URL to its list of its citing works
+       - A dict mapping each original work's URL to its list of its citing works
          (if `keep_parent_ids=True`).
 
   Args:
@@ -815,13 +817,13 @@ def fetch_citing_works_from_works(
       One or more OpenAlex work URLs/IDs, DOIs, or work JSON dicts containing an 'id'.
     fields (str or list[str], optional):
       Specific top-level work fields to include in each returned record.
-      Passed through to the API’s `select` parameter; if None, the full record is returned.
+      Passed through to the API's `select` parameter; if None, the full record is returned.
     session (requests.Session, optional):
       An existing HTTP session to reuse for all requests. If None, a new session is
       opened and closed internally.
     keep_parent_ids (bool, default=False):
       - If False: returns a flat list of all citing-work JSON dicts.
-      - If True: returns a dict where each key is an original work’s OpenAlex URL and
+      - If True: returns a dict where each key is an original work's OpenAlex URL and
         each value is the list of works that cite that work.
 
   Returns:
@@ -862,27 +864,27 @@ def fetch_citing_works_from_author(
     3. For each of those works, fetches all works that cite it.
     4. Aggregates results into either:
        - A flat list of citing-work JSON dicts (if `keep_parent_ids=False`), or
-       - A dict mapping each original work’s URL to its list of its citing works
+       - A dict mapping each original work's URL to its list of its citing works
          (if `keep_parent_ids=True`).
 
   Args:
     author_id (str or dict):
       An ORCID, OpenAlex author URL/ID, or an author JSON dict containing an 'id'.
     fields (str or list[str], optional):
-      Specific top-level fields of each citing work to include (passed to the API’s
+      Specific top-level fields of each citing work to include (passed to the API's
       `select` parameter). If None, the API returns the full work record.
     session (requests.Session, optional):
       If provided, reuses this HTTP session for all requests; otherwise a new session
       is created and closed internally.
     keep_parent_ids (bool, default=False):
       - False: returns a flat list of all citing-work records.
-      - True: returns a dict mapping each authored work’s URL to its list of citing works.
+      - True: returns a dict mapping each authored work's URL to its list of citing works.
 
   Returns:
     list[dict] or dict[str, list[dict]]:
       Depending on `keep_parent_ids`, either:
-        - A flat list of works that cite any of the author’s works.
-        - A mapping from each authored work’s URL to its list of citing works.
+        - A flat list of works that cite any of the author's works.
+        - A mapping from each authored work's URL to its list of citing works.
 
   Raises:
     HTTPError:
@@ -913,21 +915,21 @@ def fetch_citing_works_from_authors(
     3. For each of those works, fetches all works that cite it.
     4. Aggregates results into either:
        - A flat list of all citing-work records (if `keep_parent_ids=False`), or
-       - A dict mapping each author’s URL to the list of works that cite any of their works
+       - A dict mapping each author's URL to the list of works that cite any of their works
          (if `keep_parent_ids=True`).
 
   Args:
     author_ids (str or list[str] or dict or list[dict]):
       An ORCID, OpenAlex author URL/ID, or author JSON dict (or a list thereof).
     fields (str or list[str], optional):
-      Specific top-level fields of each citing work to include (passed to the API’s
+      Specific top-level fields of each citing work to include (passed to the API's
       `select` parameter). If None, the API returns the full work records.
     session (requests.Session, optional):
       If provided, reuses this HTTP session for all requests; otherwise a new session
       is created and closed internally.
     keep_parent_ids (bool, default=False):
-      - False: returns a flat list of all works citing any of the authors’ works.
-      - True: returns a dict mapping each author’s URL to its list of citing works.
+      - False: returns a flat list of all works citing any of the authors' works.
+      - True: returns a dict mapping each author's URL to its list of citing works.
 
   Returns:
     list[dict] or dict[str, list of dict]:
@@ -968,21 +970,21 @@ def fetch_citing_authors_from_work(
     3. For each citing work, extracts its list of authors.
     4. Aggregates those authors into either:
        - A flat list of author records (if `keep_parent_ids=False`), or
-       - A dict mapping the cited work’s URL to the list of its citing authors
+       - A dict mapping the cited work's URL to the list of its citing authors
          (if `keep_parent_ids=True`).
 
   Args:
     work_id (str or dict):
       An OpenAlex work URL/ID, DOI URL/ID, or partial work JSON dict containing `'id'`.
     fields (str or list[str], optional):
-      Specific top-level fields of each author to include (passed to the API’s
+      Specific top-level fields of each author to include (passed to the API's
       `select` parameter). If None, the full author records are returned.
     session (requests.Session, optional):
       If provided, reuses this HTTP session for all requests; otherwise a new session
       is created and closed internally.
     keep_parent_ids (bool, default=False):
       - False: returns a flat list of author records across all citing works.
-      - True: returns a dict with the single key being the cited work’s URL and the
+      - True: returns a dict with the single key being the cited work's URL and the
         value being its list of citing-author records.
 
   Returns:
@@ -1019,7 +1021,7 @@ def fetch_citing_authors_from_works(
     3. Collects the author lists for those citing works.
     4. Returns either:
        - A flat list of author records (if `keep_parent_ids=False`), or
-       - A dict mapping each target work’s URL to the list of its citing authors
+       - A dict mapping each target work's URL to the list of its citing authors
          (if `keep_parent_ids=True`).
 
   Args:
@@ -1137,7 +1139,7 @@ def _to_dict(
   entities: list
 ) -> dict:
   """
-  Build a mapping from each entity’s unique ID to its display name.
+  Build a mapping from each entity's unique ID to its display name.
 
   Processes a list of OpenAlex entity records, each of which must include
   the keys 'id' (a unique URI string) and 'display_name' (the human-readable
@@ -1168,7 +1170,7 @@ def _to_dataframe(
 
   This utility converts each entity (a JSON-like dict) into a row in a DataFrame.
   By default, every row will include the columns:
-    - 'id'             : the entity’s unique identifier (e.g. URL)
+    - 'id'             : the entity's unique identifier (e.g. URL)
     - 'display_name'   : the human-readable name
     - 'occurrences'    : a numeric count attached to the entity
 
@@ -1547,8 +1549,8 @@ def list_by_sorted_hindex(
   ----------
   df : pandas.DataFrame
     DataFrame containing at least the following columns:
-    - 'display_name' (str): the author’s name
-    - 'h_index' (int): the author’s h-index
+    - 'display_name' (str): the author's name
+    - 'h_index' (int): the author's h-index
     - 'occurrences' (int): number of works linking to the target author
     The DataFrame must be sorted in descending order by 'h_index' and
     should have a monotonically increasing index (used as the rank).
