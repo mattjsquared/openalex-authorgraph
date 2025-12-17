@@ -79,12 +79,14 @@ def request_with_backoff(
   retries = 0
   pause = 0.1
   if params is None:
-    params = {}
-  params.update({'mailto': USER_EMAIL})
+    _params = {}
+  else:
+    _params = params.copy()
+  _params.setdefault('mailto', USER_EMAIL)
   with _conditional_session(session) as _session:
     tstart = time.time()
     while True:
-      r = _session.get(url, params=params)
+      r = _session.get(url, params=_params)
       # If searching for authors and we hit a 404, retry with the "people" url
       if (r.status_code == 404) and ('authors' in url):
         url = f"{BASE_URL}people"
@@ -246,7 +248,7 @@ def request_entities(
 # --- Field filtering utility ---
 def _filter_fields(
   obj: dict,
-  fields
+  fields: str | list = None
 ) -> dict:
   """
   Reduce a JSON object to only the specified top-level fields.
@@ -263,8 +265,10 @@ def _filter_fields(
     return obj
   # Normalize single string to list
   if isinstance(fields, str):
-    fields = [fields]
-  return {f: obj.get(f) for f in fields}
+    _fields = [fields]
+  else:
+    _fields = fields
+  return {f: obj.get(f) for f in _fields}
 
 
 def _fields2params(
@@ -463,14 +467,25 @@ def fetch_authors(
   url = f"{BASE_URL}authors"
   with _conditional_session(session) as _session:
     author_ids = standardize_author_ids(author_ids, session=_session)
-    params['filter'] = f"ids.openalex:{'|'.join(author_ids)}"
-    data = request_entities(url, params=params, session=_session)
-  data = data['results']
+    # Split up long queries to avoid HTTP 400 errors
+    max_ids_per_request = 50
+    results = []
+    if len(author_ids) == 0:
+      return []
+    for i in range(0, len(author_ids), max_ids_per_request):
+      batch = author_ids[i:i+max_ids_per_request]
+      params['filter'] = f"ids.openalex:{'|'.join(batch)}"
+      data = request_entities(url, params=params, session=_session)
+      if isinstance(data, dict) and 'results' in data:
+        results.extend(data['results'])
+      else:
+        results.extend(data)
+    data = results
   author_map = {auth['id']: auth for auth in data}
   data = [author_map.get(aid) for aid in author_ids]
   if any(auth is None for auth in data):
-    missing_id = [aid for aid, auth in zip(author_ids, data) if auth is None]
-    raise RuntimeError("≥1 author was not retrieved:\n"+"\n".join(f"{mid}" for mid in missing_id))
+    warnings.warn("≥1 author was not retrieved; discarding missing entries.")
+    data = [auth for auth in data if auth is not None]
   return data
 
 
@@ -671,12 +686,20 @@ def fetch_authors_from_work(
       If any underlying HTTP request fails for a non-rate-limit error.
   """
   with _conditional_session(session) as _session:
+    # Fetch the work object
     work_id = standardize_work_ids(work_id, session=_session)[0]
     work = fetch_works(work_id, fields=['id', 'authorships'], session=_session)[0]
+    # Extract author IDs from authorships object
     if not work.get('authorships'):
       warnings.warn(f"No authorships: work ID {work_id}")
       return []
     author_ids = [auth.get('author').get('id') for auth in work.get('authorships')]
+    # Fetch author objects
+    if any(aid is None for aid in author_ids):
+      warnings.warn(f"Some authorships missing author IDs: work ID {work_id}. Discarding those entries.")
+      author_ids = [aid for aid in author_ids if aid is not None]
+    if not author_ids:
+      return []
     authors = fetch_authors(author_ids, fields=fields, session=_session)
   return authors
 
@@ -841,7 +864,7 @@ def fetch_citing_works_from_works(
     work_ids = standardize_work_ids(work_ids, session=_session)
     citing_works = {} if keep_parent_ids else []
     _fetcher = functools_partial(fetch_citing_works_from_work, fields=fields, session=_session)
-    for wid in tqdm(work_ids, desc="Fetching works that cite target work"):
+    for wid in tqdm(work_ids, desc="Fetching works that cite target works"):
       if keep_parent_ids:
         citing_works[wid] = _fetcher(wid)
       else:
